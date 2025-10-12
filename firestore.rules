@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Admin = users/{uid}.user_role === "admin"
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == "admin";
+    }
+
+    // Convenience: email from auth token (may be null)
+    function authEmail() {
+      return isSignedIn() ? request.auth.token.email : null;
+    }
+
+    /* ---------------------------------------------------
+     * Page content (public read, admins write)
+     * --------------------------------------------------- */
+    match /page_content/{doc} {
+      allow read: if true;
+
+      // Optional: schema guard (prevents junk writes)
+      function validPageContent() {
+        return request.resource.data.keys().hasOnly([
+          "page_name", "content_key", "content_type",
+          "content_value", "description", "updated_at"
+        ]);
+      }
+
+      allow create, update, delete: if isAdmin() && validPageContent();
+    }
+
+    /* ---------------------------------------------------
+     * Users (default users collection)
+     * - Anyone can create their own doc
+     * - No role escalation on create (user_role must be "user" or absent)
+     * - Only admins can update/delete
+     * - Read own doc or admin
+     * --------------------------------------------------- */
+    match /users/{uid} {
+      allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+
+      // Create own user doc; prevent setting admin role on create
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && ( !("user_role" in request.resource.data)
+             || request.resource.data.user_role == "user" );
+
+      // Only admins can update/delete (so only admins can set user_role = admin)
+      allow update, delete: if isAdmin();
+    }
+
+    /* ---------------------------------------------------
+     * Registrations
+     * - Public can create (free / paid starts)
+     * - Read: admin OR the owner (match by email or owner_uid if you store it)
+     * - Update/Delete: admins only
+     * - Prevent users from setting admin-only fields on create
+     * --------------------------------------------------- */
+    match /registrations/{id} {
+      // Which fields public is allowed to set at creation time
+      function validRegistrationCreate() {
+        // deny escalations (no admin fields on create)
+        return !(
+          ("review_status" in request.resource.data) ||
+          ("payment_status" in request.resource.data) ||
+          ("paypal_order_id" in request.resource.data)
+        );
+      }
+
+      // Public can create a registration (use recaptcha/App check on the client if possible)
+      allow create: if validRegistrationCreate();
+
+      // Read: admin OR the person who owns it.
+      // If you store owner_uid, prefer that check; otherwise compare email.
+      allow read: if isAdmin()
+        || ( isSignedIn()
+             && (
+                  ( "owner_uid" in resource.data && resource.data.owner_uid == request.auth.uid )
+                  || ( "email" in resource.data && resource.data.email == authEmail() )
+                )
+           );
+
+      // Only admins can update/delete registrations
+      allow update, delete: if isAdmin();
+    }
+
+    /* ---------------------------------------------------
+     * Trigger Email extension (mail collection)
+     * - Only admins can create docs that trigger emails
+     * - No reads/updates/deletes from clients
+     * --------------------------------------------------- */
+    match /mail/{docId} {
+      allow create: if isAdmin();
+      allow read, update, delete: if false;
+    }
+  }
+}
