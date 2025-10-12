@@ -2,102 +2,157 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    /* ========= Helpers / Roles ========= */
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Admin = users/{uid}.user_role === "admin"
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == "admin";
     }
 
-    // Convenience: email from auth token (may be null)
-    function authEmail() {
-      return isSignedIn() ? request.auth.token.email : null;
+    function isEmail(s) {
+      return s is string && s.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
     }
 
-    /* ---------------------------------------------------
-     * Page content (public read, admins write)
-     * --------------------------------------------------- */
+    function shortStr(s, max) {
+      return s is string && s.size() > 0 && s.size() <= max;
+    }
+
+    /* ========= page_content ========= */
     match /page_content/{doc} {
+      // public read
       allow read: if true;
 
-      // Optional: schema guard (prevents junk writes)
       function validPageContent() {
         return request.resource.data.keys().hasOnly([
-          "page_name", "content_key", "content_type",
-          "content_value", "description", "updated_at"
+          "page_name","content_key","content_type",
+          "content_value","description","updated_at"
         ]);
       }
 
+      // only admins can create/update/delete and only with allowed keys
       allow create, update, delete: if isAdmin() && validPageContent();
     }
 
-    /* ---------------------------------------------------
-     * Users (default users collection)
-     * - Anyone can create their own doc
-     * - No role escalation on create (user_role must be "user" or absent)
-     * - Only admins can update/delete
-     * - Read own doc or admin
-     * --------------------------------------------------- */
+    /* ========= users (minimal) ========= */
+    // Adjust if you need different behavior; kept strict by default.
     match /users/{uid} {
+      // a user can read their own profile; admins can read any
       allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
 
-      // Create own user doc; prevent setting admin role on create
-      allow create: if isSignedIn()
-        && request.auth.uid == uid
-        && ( !("user_role" in request.resource.data)
-             || request.resource.data.user_role == "user" );
+      // profile updates are limited to the owner; admins can also write
+      allow create, update: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
 
-      // Only admins can update/delete (so only admins can set user_role = admin)
-      allow update, delete: if isAdmin();
+      // deleting users is admin only
+      allow delete: if isAdmin();
     }
 
-    /* ---------------------------------------------------
-     * Registrations
-     * - Public can create (free / paid starts)
-     * - Read: admin OR the owner (match by email or owner_uid if you store it)
-     * - Update/Delete: admins only
-     * - Prevent users from setting admin-only fields on create
-     * --------------------------------------------------- */
+    /* ========= registrations =========
+       - Anyone (even without auth) can CREATE a registration with strict validation.
+       - Only admins can read/update/delete registrations.
+    =================================== */
     match /registrations/{id} {
-      // Which fields public is allowed to set at creation time
-      function validRegistrationCreate() {
-        // deny escalations (no admin fields on create)
-        return !(
-          ("review_status" in request.resource.data) ||
-          ("payment_status" in request.resource.data) ||
-          ("paypal_order_id" in request.resource.data)
-        );
+
+      function keysValid() {
+        return request.resource.data.keys().hasOnly([
+          'name', 'email', 'phone', 'country',
+          'registration_product_id', 'attendee_type',
+          'add_ons', 'amount', 'currency',
+          'payment_required', 'payment_provider', 'payment_status',
+          'review_status', 'paypal_order_id', 'created_date'
+        ]);
       }
 
-      // Public can create a registration (use recaptcha/App check on the client if possible)
-      allow create: if validRegistrationCreate();
+      function shapeValid() {
+        return
+          // identity
+          shortStr(request.resource.data.name, 200) &&
+          isEmail(request.resource.data.email) &&
+          shortStr(request.resource.data.phone, 40) &&
+          shortStr(request.resource.data.country, 100) &&
 
-      // Read: admin OR the person who owns it.
-      // If you store owner_uid, prefer that check; otherwise compare email.
-      allow read: if isAdmin()
-        || ( isSignedIn()
-             && (
-                  ( "owner_uid" in resource.data && resource.data.owner_uid == request.auth.uid )
-                  || ( "email" in resource.data && resource.data.email == authEmail() )
-                )
-           );
+          // product & role
+          (request.resource.data.registration_product_id is string &&
+           request.resource.data.registration_product_id.size() > 0 &&
+           request.resource.data.registration_product_id.size() <= 100) &&
+          (request.resource.data.attendee_type in ['user','exhibitor','agent','sponsor']) &&
 
-      // Only admins can update/delete registrations
-      allow update, delete: if isAdmin();
+          // add-ons
+          (request.resource.data.add_ons is list &&
+           request.resource.data.add_ons.size() <= 20 &&
+           request.resource.data.add_ons.where(a, a is string && a.size() <= 100).size()
+             == request.resource.data.add_ons.size()) &&
+
+          // money & currency
+          (request.resource.data.amount is number &&
+           request.resource.data.amount >= 0 &&
+           request.resource.data.amount <= 100000) &&
+          (request.resource.data.currency is string &&
+           request.resource.data.currency.size() > 0 &&
+           request.resource.data.currency.size() <= 10) &&
+
+          // payment flags
+          (request.resource.data.payment_required is bool) &&
+          (request.resource.data.payment_status in ['free','paid','pending']) &&
+
+          // free path vs paid path
+          (
+            (!request.resource.data.payment_required &&
+               request.resource.data.amount == 0 &&
+               request.resource.data.payment_status == 'free')
+            ||
+            (request.resource.data.payment_required &&
+               request.resource.data.amount > 0 &&
+               request.resource.data.payment_status in ['paid','pending'] &&
+               request.resource.data.payment_provider is string &&
+               request.resource.data.payment_provider.size() <= 50)
+          ) &&
+
+          // start every submission as pending review
+          (request.resource.data.review_status == 'pending');
+      }
+
+      // ✅ Public create (includes unauthenticated)
+      allow create: if keysValid() && shapeValid();
+
+      // 🔒 Admin-only read/update/delete
+      allow read, update, delete: if isAdmin();
     }
 
-    /* ---------------------------------------------------
-     * Trigger Email extension (mail collection)
-     * - Only admins can create docs that trigger emails
-     * - No reads/updates/deletes from clients
-     * --------------------------------------------------- */
+    /* ========= mail (optional: Firebase email extension) =========
+       Allow public create so the site can enqueue outbound emails.
+       Tight key & size checks to avoid abuse.
+    =============================================================== */
     match /mail/{docId} {
-      allow create: if isAdmin();
-      allow read, update, delete: if false;
+      allow create: if
+        request.resource.data.keys().hasOnly(['to','message','subject'])
+        &&
+        (
+          (request.resource.data.to is string && isEmail(request.resource.data.to))
+          ||
+          (request.resource.data.to is list &&
+           request.resource.data.to.size() > 0 &&
+           request.resource.data.to.size() <= 20 &&
+           request.resource.data.to.where(x, isEmail(x)).size()
+             == request.resource.data.to.size())
+        )
+        &&
+        (request.resource.data.subject is string &&
+         request.resource.data.subject.size() > 0 &&
+         request.resource.data.subject.size() <= 200)
+        &&
+        (request.resource.data.message is map);
+
+      // reading/deleting queued mail is admin only
+      allow read, update, delete: if isAdmin();
+    }
+
+    /* ========= Default deny for everything else ========= */
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
