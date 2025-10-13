@@ -177,34 +177,55 @@ export default function Register() {
 
   /* ------------------------------ PayPal hooks ----------------------------- */
   const handlePayPalSuccess = async (paymentDetails) => {
-    setIsProcessing(true);
-    const registrationData = {
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      country: formData.country,
-      registration_product_id: selectedProduct?.id,
-      attendee_type: selectedProduct?.kind,
-      add_ons: formData.add_ons || [],
-      amount: Number(totalAmount.toFixed(2)),
-      currency: "USD",
-      payment_required: true,
-      payment_provider: "paypal",
-      payment_status: "paid",
-      review_status: "pending",
-      paypal_order_id: paymentDetails?.orderId || null
-    };
-    try {
-      await createRegistrationMutation.mutateAsync(registrationData);
-    } catch (error) {
-      setIsProcessing(false);
-      setErrors({
-        payment:
-          "Registration failed after payment. Please contact support with order ID: " +
-          (paymentDetails?.orderId || "N/A")
-      });
-    }
+  setIsProcessing(true);
+
+  // Extract order & capture details safely
+  const orderId =
+    paymentDetails?.id ||
+    paymentDetails?.orderID ||
+    paymentDetails?.orderId ||
+    null;
+
+  const unit = paymentDetails?.purchase_units?.[0];
+  const capture = unit?.payments?.captures?.[0];
+  const payer = paymentDetails?.payer;
+
+  const registrationData = {
+    name: formData.name,
+    email: formData.email,
+    phone: formData.phone,
+    country: formData.country,
+
+    registration_product_id: selectedProduct?.id,
+    attendee_type: selectedProduct?.kind,
+    add_ons: formData.add_ons || [],
+
+    amount: Number(totalAmount.toFixed(2)),
+    currency: "USD",
+    payment_required: true,
+    payment_provider: "paypal",
+    payment_status: "paid",
+    review_status: "pending",
+
+    // Persist important PayPal fields for reconciliation
+    paypal_order_id: orderId,
+    paypal_capture_id: capture?.id || null,
+    payer_email: payer?.email_address || null,
+    payer_name: [payer?.name?.given_name, payer?.name?.surname].filter(Boolean).join(" ") || null,
   };
+
+  try {
+    await createRegistrationMutation.mutateAsync(registrationData);
+  } catch (error) {
+    setIsProcessing(false);
+    setErrors({
+      payment:
+        "Registration failed after payment. Please contact support with order ID: " +
+        (orderId || "N/A"),
+    });
+  }
+}
+
 
   const handlePayPalError = (error) => {
     setIsProcessing(false);
