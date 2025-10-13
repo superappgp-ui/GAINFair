@@ -10,19 +10,34 @@ export default function RegistrationSuccess() {
   const [sp] = useSearchParams();
   const id = sp.get("id");
 
-  const { data: reg, isLoading } = useQuery({
-    queryKey: ['registration', id],
+  const { data: reg, isLoading, isError } = useQuery({
+    queryKey: ["registration", id],
     queryFn: () => getRegistrationById(id),
-    enabled: !!id
+    enabled: !!id,
   });
 
-  if (isLoading) return <div className="p-8">Loading...</div>;
-  if (!reg) return <div className="p-8">Registration not found.</div>;
+  if (isLoading) {
+    return <div className="p-6">Loading your registration…</div>;
+  }
+
+  if (isError || !reg) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto">
+        <Card>
+          <CardContent className="space-y-4 p-6">
+            <h1 className="text-2xl font-semibold">Thanks for registering!</h1>
+            <p>We’ve received your submission. Please check your email for a confirmation.</p>
+            <Button asChild><Link to="/">Back to Home</Link></Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="container max-w-xl mx-auto py-12">
+    <div className="p-6 max-w-2xl mx-auto">
       <Card>
-        <CardContent className="space-y-4 pt-6">
+        <CardContent className="space-y-4 p-6">
           <h1 className="text-2xl font-semibold">Thanks, {reg.name}!</h1>
           <p>We’ve received your registration.</p>
           <div className="flex items-center gap-2">

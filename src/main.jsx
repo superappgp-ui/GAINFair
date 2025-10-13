@@ -1,4 +1,3 @@
-// src/main.jsx
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -7,23 +6,36 @@ import App from "./App.jsx";
 import { AuthProvider } from "@/components/AuthProvider";
 import "./index.css";
 
+import { app } from "@/firebase";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
+
+const ensureAnonymousAuth = async () => {
+  const auth = getAuth(app);
+  await new Promise((resolve) => {
+    const stop = onAuthStateChanged(auth, async (u) => {
+      if (u) { stop(); resolve(); return; }
+      try { await signInAnonymously(auth); }
+      finally { /* wait for next onAuthStateChanged tick */ }
+    });
+  });
+};
+
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
+  defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
 });
 
-createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </AuthProvider>
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+(async () => {
+  await ensureAnonymousAuth();
+
+  createRoot(document.getElementById("root")).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </AuthProvider>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+})();

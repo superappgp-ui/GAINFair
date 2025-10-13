@@ -220,15 +220,23 @@ async function uploadPublicFile(file, path) {
   return await getDownloadURL(r);
 }
 
-// Trigger Email extension
+// Trigger Email extension — robust invoice sender
+// Requires the "Trigger Email from Firestore" extension installed on the SAME project.
+// Adds a /mail doc with: to[], from, message.{subject,text,html}, createdAt
 async function sendInvoiceEmail({ to, subject, html, from }) {
-  await addDoc(collection(db, "mail"), {
-    to,
-    message: { subject, html },
-    ...(from ? { from } : {}),
+  const safeTo = Array.isArray(to) ? to : [to];
+  const plainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 10000);
+  const fromAddress = from || (import.meta.env.VITE_EMAIL_FROM || "GAIN FAIR <no-reply@gainfair.vn>");
+  const payload = {
+    to: safeTo,
+    from: fromAddress,
+    message: { subject, text: plainText, html },
     createdAt: serverTimestamp(),
-  });
+  };
+  await addDoc(collection(db, "mail"), payload);
 }
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                                UI COMPONENTS                               */
