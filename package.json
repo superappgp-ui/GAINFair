@@ -1,7 +1,8 @@
 {
-  "name": "base44-app",
+  "name": "GAIN Fair",
   "private": true,
   "version": "0.0.0",
+  "engines": { "node": "20" },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -44,6 +45,8 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.5.2",
     "firebase": "^12.4.0",
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^5.0.1",
     "framer-motion": "^12.4.7",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.475.0",

@@ -140,7 +140,7 @@ const CONTENT_TEMPLATES = {
     
     { key: "contact_cta_title", type: "text", description: "Contact CTA title", example: "Still Have Questions?" },
     { key: "contact_cta_description", type: "text", description: "Contact CTA description", example: "Our team is here to help..." },
-    { key: "contact_email", type: "text", description: "Contact email", example: "info@gainfair.vn" }
+    { key: "contact_email", type: "text", description: "Contact email", example: "info@greenpassgroup.com" }
   ],
   register: [
     { key: "page_title", type: "text", description: "Page title", example: "Register for GAIN FAIR 2025" },
@@ -205,7 +205,8 @@ async function deletePageContent(id) {
 }
 
 async function listRegistrations() {
-  const q = query(collection(db, "registrations"), orderBy("created_date", "desc"));
+  // Align with Register.jsx which writes `created_at`
+  const q = query(collection(db, "registrations"), orderBy("created_at", "desc"));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
@@ -220,23 +221,26 @@ async function uploadPublicFile(file, path) {
   return await getDownloadURL(r);
 }
 
-// Trigger Email extension — robust invoice sender
-// Requires the "Trigger Email from Firestore" extension installed on the SAME project.
-// Adds a /mail doc with: to[], from, message.{subject,text,html}, createdAt
-async function sendInvoiceEmail({ to, subject, html, from }) {
+/**
+ * Trigger Email extension — Zoho-safe sender.
+ * - Omit `from` to use Extension Default FROM (prevents spoofing)
+ * - Add `replyTo` so replies land in your Zoho inbox
+ */
+async function sendInvoiceEmail({ to, subject, html, from, replyTo }) {
   const safeTo = Array.isArray(to) ? to : [to];
   const plainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 10000);
-  const fromAddress = from || (import.meta.env.VITE_EMAIL_FROM || "GAIN FAIR <no-reply@gainfair.vn>");
+  const fromAddress = from ?? import.meta.env.VITE_EMAIL_FROM ?? undefined;
+
   const payload = {
     to: safeTo,
-    from: fromAddress,
     message: { subject, text: plainText, html },
     createdAt: serverTimestamp(),
   };
+  if (fromAddress) payload.from = fromAddress; // omit if undefined to use Extension default
+  if (replyTo) payload.replyTo = replyTo;
+
   await addDoc(collection(db, "mail"), payload);
 }
-
-
 
 /* -------------------------------------------------------------------------- */
 /*                                UI COMPONENTS                               */
@@ -266,12 +270,12 @@ function RegistrationCard({ registration, onVerify }) {
             <div>
               <h3 className="font-semibold text-[#0B132B] text-lg">{registration.name}</h3>
               <div className="flex flex-wrap gap-2 mt-2">
-                <Badge className={attendeeTypeColors[registration.attendee_type]}>
+                <Badge className={attendeeTypeColors[registration.attendee_type] || "bg-gray-100 text-gray-800"}>
                   {registration.attendee_type}
                 </Badge>
                 <Badge className={reviewStatusConfig[registration.review_status]?.color}>
                   <ReviewIcon className="w-3 h-3 mr-1" />
-                  {reviewStatusConfig[registration.review_status]?.label}
+                  {reviewStatusConfig[registration.review_status]?.label || "Pending"}
                 </Badge>
                 {registration.payment_status === "paid" && (
                   <Badge className="bg-emerald-100 text-emerald-800">
@@ -633,7 +637,7 @@ export default function CMSDashboard() {
     }
   };
 
-  const handleDownloadCSV = (registrationType) => {
+  const handleDownloadCSV = (registrationType /* 'free' | 'paid' */) => {
     const dataToExport = registrations.filter((r) => r.payment_status === registrationType);
     if (dataToExport.length === 0) {
       toast({ title: "No Data", description: `No ${registrationType} registrations to export`, variant: "destructive" });
@@ -646,6 +650,15 @@ export default function CMSDashboard() {
       "PayPal Order ID","Add-ons","Created Date"
     ];
 
+    const safeDateString = (reg) => {
+      // Handle Firestore Timestamp, ISO string, or millis
+      const ts = reg.created_at;
+      if (ts && typeof ts.toDate === "function") return ts.toDate().toLocaleString();
+      if (ts) return new Date(ts).toLocaleString();
+      if (reg.created_date) return new Date(reg.created_date).toLocaleString();
+      return "";
+    };
+
     const rows = dataToExport.map(reg => {
       const product = registrationProducts.find(p => p.id === reg.registration_product_id);
       return [
@@ -653,7 +666,7 @@ export default function CMSDashboard() {
         reg.attendee_type, product?.label || reg.registration_product_id,
         reg.amount, reg.currency, reg.payment_status, reg.review_status,
         reg.paypal_order_id || "", (reg.add_ons || []).join("; "),
-        reg.created_date ? new Date(reg.created_date).toLocaleString() : ""
+        safeDateString(reg)
       ];
     });
 
@@ -686,121 +699,86 @@ export default function CMSDashboard() {
       const emailBody = `
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc;">
-  <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-    <div style="text-align: center; margin-bottom: 30px;">
-      <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #0EA5E9 0%, #22C55E 100%); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px;">
-        <span style="color: white; font-size: 32px; font-weight: bold;">G</span>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f8fafc;">
+  <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+    <div style="text-align:center;margin-bottom:30px;">
+      <div style="width:60px;height:60px;background:linear-gradient(135deg,#0EA5E9 0%,#22C55E 100%);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
+        <span style="color:white;font-size:32px;font-weight:bold;">G</span>
       </div>
-      <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #0B132B;">Registration Confirmed!</h1>
-      <p style="margin: 8px 0 0 0; color: #64748B; font-size: 16px;">GAIN FAIR 2025</p>
+      <h1 style="margin:0;font-size:28px;font-weight:bold;color:#0B132B;">Registration Confirmed!</h1>
+      <p style="margin:8px 0 0 0;color:#64748B;font-size:16px;">GAIN FAIR 2025</p>
     </div>
 
-    <p style="font-size: 16px; color: #475569; margin-bottom: 24px;">Dear ${registration.name},</p>
-    <p style="font-size: 16px; color: #475569; margin-bottom: 32px;">Your registration for GAIN FAIR 2025 has been confirmed! Below are your invoice details.</p>
+    <p style="font-size:16px;color:#475569;margin-bottom:24px;">Dear ${registration.name},</p>
+    <p style="font-size:16px;color:#475569;margin-bottom:32px;">Your registration for GAIN FAIR 2025 has been confirmed! Below are your invoice details.</p>
 
-    <div style="background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); overflow: hidden; margin-bottom: 24px;">
-      <div style="background: linear-gradient(135deg, #0EA5E9 0%, #22C55E 100%); padding: 20px; text-align: center;">
-        <h2 style="margin: 0; color: white; font-size: 20px; font-weight: bold;">Invoice #${invoiceNumber}</h2>
-        <p style="margin: 8px 0 0 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">${new Date(invoiceDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);overflow:hidden;margin-bottom:24px;">
+      <div style="background:linear-gradient(135deg,#0EA5E9 0%,#22C55E 100%);padding:20px;text-align:center;">
+        <h2 style="margin:0;color:white;font-size:20px;font-weight:bold;">Invoice #${invoiceNumber}</h2>
+        <p style="margin:8px 0 0 0;color:rgba(255,255,255,0.9);font-size:14px;">
+          ${new Date(invoiceDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+        </p>
       </div>
 
-      <div style="padding: 24px; border-bottom: 2px solid #f1f5f9;">
-        <h3 style="margin: 0 0 16px 0; font-size: 16px; font-weight: bold; color: #0B132B;">Event Details</h3>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500; width: 40%;">Event:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 600;">GAIN FAIR 2025</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Date:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">October 25, 2025</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; color: #6b7280; font-weight: 500;">Venue:</td>
-            <td style="padding: 12px; color: #1f2937;">Quảng Trị Convention Center, Vietnam</td>
-          </tr>
+      <div style="padding:24px;border-bottom:2px solid #f1f5f9;">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:bold;color:#0B132B;">Event Details</h3>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;width:40%;">Event:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;font-weight:600;">GAIN FAIR 2025</td></tr>
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Date:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">October 25, 2025</td></tr>
+          <tr><td style="padding:12px;color:#6b7280;font-weight:500;">Venue:</td><td style="padding:12px;color:#1f2937;">Quảng Trị Convention Center, Vietnam</td></tr>
         </table>
       </div>
 
-      <div style="padding: 24px; border-bottom: 2px solid #f1f5f9;">
-        <h3 style="margin: 0 0 16px 0; font-size: 16px; font-weight: bold; color: #0B132B;">Registration Details</h3>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500; width: 40%;">Name:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${registration.name}</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Email:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${registration.email}</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Phone:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${registration.phone}</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Country:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${registration.country}</td>
-          </tr>
-          ${registration.organization ? `<tr><td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Organization:</td><td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${registration.organization}</td></tr>` : ''}
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Registration Type:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 600;">${product?.label || registration.registration_product_id}</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; color: #6b7280; font-weight: 500;">Attendee Type:</td>
-            <td style="padding: 12px; color: #1f2937; text-transform: capitalize;">${registration.attendee_type}</td>
-          </tr>
+      <div style="padding:24px;border-bottom:2px solid #f1f5f9;">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:bold;color:#0B132B;">Registration Details</h3>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;width:40%;">Name:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">${registration.name}</td></tr>
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Email:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">${registration.email}</td></tr>
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Phone:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">${registration.phone}</td></tr>
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Country:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">${registration.country}</td></tr>
+          ${registration.organization ? `<tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Organization:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;">${registration.organization}</td></tr>` : ""}
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Registration Type:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;font-weight:600;">${product?.label || registration.registration_product_id}</td></tr>
+          <tr><td style="padding:12px;color:#6b7280;font-weight:500;">Attendee Type:</td><td style="padding:12px;color:#1f2937;text-transform:capitalize;">${registration.attendee_type}</td></tr>
         </table>
       </div>
 
-      <div style="padding: 24px;">
-        <h3 style="margin: 0 0 16px 0; font-size: 16px; font-weight: bold; color: #0B132B;">Payment Details</h3>
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500; width: 40%;">Amount:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 600; font-size: 18px;">${registration.amount === 0 ? 'FREE' : `$${registration.amount} ${registration.currency}`}</td>
-          </tr>
-          <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">Payment Status:</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; text-transform: capitalize;">${registration.payment_status}</td>
-          </tr>
-          ${registration.paypal_order_id ? `<tr><td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500;">PayPal Order ID:</td><td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-family: monospace; font-size: 12px;">${registration.paypal_order_id}</td></tr>` : ''}
+      <div style="padding:24px;">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:bold;color:#0B132B;">Payment Details</h3>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;width:40%;">Amount:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;font-weight:600;font-size:18px;">${registration.amount === 0 ? 'FREE' : `$${registration.amount} ${registration.currency}`}</td></tr>
+          <tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">Payment Status:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;text-transform:capitalize;">${registration.payment_status}</td></tr>
+          ${registration.paypal_order_id ? `<tr><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">PayPal Order ID:</td><td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#1f2937;font-family:monospace;font-size:12px;">${registration.paypal_order_id}</td></tr>` : ""}
           ${addOnsDetails}
         </table>
       </div>
 
-      <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 16px; text-align: center;">
-        <p style="margin: 0; color: white; font-weight: 600; font-size: 14px;">✓ Registration Confirmed</p>
+      <div style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);padding:16px;text-align:center;">
+        <p style="margin:0;color:white;font-weight:600;font-size:14px;">✓ Registration Confirmed</p>
       </div>
     </div>
 
-    <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 24px; border-left: 4px solid #0EA5E9;">
-      <p style="margin: 0; color: #475569; font-size: 14px; line-height: 1.6;">
+    <div style="background:#f8fafc;border-radius:8px;padding:20px;margin-bottom:24px;border-left:4px solid #0EA5E9;">
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
         Your registration is now confirmed. We look forward to seeing you at GAIN FAIR 2025!
       </p>
     </div>
 
-    <p style="font-size: 14px; color: #64748B; text-align: center; margin-bottom: 8px;">
-      For any questions, please contact us at <a href="mailto:info@gainfair.vn" style="color: #0EA5E9; text-decoration: none;">info@gainfair.vn</a>
+    <p style="font-size:14px;color:#64748B;text-align:center;margin-bottom:8px;">
+      For any questions, please contact us at <a href="mailto:info@greenpassgroup.com" style="color:#0EA5E9;text-decoration:none;">info@greenpassgroup.com</a>
     </p>
-    <p style="font-size: 14px; color: #64748B; text-align: center; margin: 0;">
-      Best regards,<br><strong style="color: #0B132B;">GAIN FAIR Team</strong>
+    <p style="font-size:14px;color:#64748B;text-align:center;margin:0;">
+      Best regards,<br><strong style="color:#0B132B;">GAIN FAIR Team</strong>
     </p>
   </div>
 </body>
-</html>
-      `;
+</html>`;
 
       await sendInvoiceEmail({
         to: registration.email,
         subject: `GAIN FAIR 2025 - Registration Confirmed - Invoice ${invoiceNumber}`,
         html: emailBody,
-        // from: 'GAIN FAIR <no-reply@your-domain>' // optional if default FROM is set in the extension
+        replyTo: "GAIN FAIR <itmanager@greenpassgroup.com>"
       });
 
       await updateRegistrationMutation.mutateAsync({
@@ -808,7 +786,7 @@ export default function CMSDashboard() {
         data: { review_status: "approved" }
       });
 
-      toast({ title: "Invoice sent", description: "Registration approved & email delivered." });
+      toast({ title: "Invoice sent", description: "Registration approved & email queued." });
     } catch (error) {
       toast({ title: "Error", description: error.message || "Failed to verify & send invoice", variant: "destructive" });
     }
@@ -817,6 +795,7 @@ export default function CMSDashboard() {
   const filteredRegistrations = useMemo(() => {
     const st = searchTerm.toLowerCase();
     return (registrations || []).filter((reg) => {
+      // ✅ Use payment_status to split tabs
       if (activeRegTab === "free" && reg.payment_status !== "free") return false;
       if (activeRegTab === "paid" && reg.payment_status !== "paid") return false;
 
@@ -832,6 +811,7 @@ export default function CMSDashboard() {
     });
   }, [registrations, searchTerm, attendeeTypeFilter, reviewStatusFilter, activeRegTab]);
 
+  // ✅ Counts based on payment_status
   const freeCount = (registrations || []).filter(r => r.payment_status === "free").length;
   const paidCount = (registrations || []).filter(r => r.payment_status === "paid").length;
   const pendingCount = (registrations || []).filter(r => r.review_status === "pending").length;

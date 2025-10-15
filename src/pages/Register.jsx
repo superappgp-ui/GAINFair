@@ -33,33 +33,76 @@ const tickets = [
   { id: "vip", name: "VIP Advising", amountVND: 500000, amountUSD: 20.83, desc: "1-on-1 advising slot" }
 ];
 
-/* ----------------------------- Email (optional) ---------------------------- */
-// Register.jsx
-async function sendAcknowledgementEmail({ to, name, registrationSummary }) {
-  const subject = "GAIN FAIR 2025 — Registration Received";
-  const html = `
-    <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;">
-      <h2 style="margin:0 0 8px;">Thanks for registering, ${name}!</h2>
-      <p style="color:#475569;margin:0 0 16px;">We’ve received your registration for GAIN FAIR 2025.</p>
-      <div style="background:#f8fafc;border-radius:8px;padding:12px;border-left:4px solid #0EA5E9;">
-        ${registrationSummary}
+/* --------------------------- Success Card (new) --------------------------- */
+function SuccessCard({ name, email, productLabel, totalUSD, onBackHome }) {
+  return (
+    <div className="pt-24 pb-20 min-h-screen bg-[#F8FAFC]">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <Card className="shadow-lg">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-3 w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+            </div>
+            <CardTitle className="text-2xl">We’ve received your registration.</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-[#475569] text-center">
+              Thanks{ name ? `, ${name}` : "" }! You’ll receive an email confirmation within
+              <strong> 24–72 hours</strong>. If you don’t see it, please check your spam folder.
+            </p>
+
+            <div className="mt-4 grid gap-3 rounded-lg border bg-gray-50 p-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-[#64748B]">Email</span>
+                <span className="font-medium">{email}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-[#64748B]">Registration Type</span>
+                <span className="font-medium">{productLabel}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-[#64748B]">Total</span>
+                <span className="font-semibold">{totalUSD <= 0 ? "FREE" : `$${totalUSD.toFixed(2)} USD`}</span>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+  <Button className="bg-[#0EA5E9] hover:bg-[#0284C7]" onClick={onBackHome}>
+    Back to Home
+  </Button>
+  <a
+    href="mailto:info@greenpassgroup.com"
+    className="inline-flex h-10 items-center justify-center px-4 text-sm font-medium text-[#0EA5E9] hover:underline focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/40 rounded-md whitespace-nowrap"
+  >
+    Need help? Contact support
+  </a>
+</div>
+
+          </CardContent>
+        </Card>
+
+        <div className="max-w-3xl mx-auto mt-10 grid md:grid-cols-2 gap-6 text-sm text-[#64748B]">
+          <div className="rounded-lg border p-4">
+            <div className="font-semibold text-[#0B132B] mb-1">Quick Links</div>
+            <ul className="space-y-1">
+              <li><a className="hover:underline" href={createPageUrl("Home")}>Home</a></li>
+              <li><a className="hover:underline" href={createPageUrl("WhyAttend")}>Why Attend</a></li>
+              <li><a className="hover:underline" href={createPageUrl("Exhibitors")}>Exhibitors</a></li>
+              <li><a className="hover:underline" href={createPageUrl("Schedule")}>Schedule</a></li>
+              <li><a className="hover:underline" href={createPageUrl("VenueTravel")}>Venue &amp; Travel</a></li>
+              <li><a className="hover:underline" href={createPageUrl("FAQs")}>FAQs</a></li>
+            </ul>
+          </div>
+          <div className="rounded-lg border p-4">
+            <div className="font-semibold text-[#0B132B] mb-1">Event Details</div>
+            <div>October 25, 2025</div>
+            <div>Quảng Trị Convention Center, Vietnam</div>
+          </div>
+        </div>
       </div>
-      <p style="color:#64748B;margin:16px 0 0;">— GAIN FAIR Team</p>
-    </div>`;
-  const text = `Thanks for registering, ${name}! We've received your registration for GAIN FAIR 2025.\n\n${registrationSummary.replace(/<[^>]+>/g, " ")}`;
-
-  try {
-    await addDoc(collection(db, "mail"), {
-      to,
-      from: "GAIN FAIR <no-reply@gainfair.vn>",   // <-- always include from (or set default in the extension)
-      message: { subject, text, html },
-      createdAt: serverTimestamp(),
-    });
-  } catch (err) {
-    console.warn("Email enqueue failed:", err?.message || err);
-  }
+    </div>
+  );
 }
-
 
 /* --------------------------------- Page ---------------------------------- */
 export default function Register() {
@@ -78,6 +121,9 @@ export default function Register() {
   const [errors, setErrors] = React.useState({});
   const [showPayPal, setShowPayPal] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
+
+  // NEW: local success state to show the success card
+  const [successInfo, setSuccessInfo] = React.useState(null);
 
   const selectedProduct = React.useMemo(
     () => registrationProducts.find(p => p.id === formData.registration_product_id),
@@ -103,22 +149,23 @@ export default function Register() {
     mutationFn: async (registrationData) => {
       const docRef = await addDoc(collection(db, "registrations"), {
         ...registrationData,
-        created_date: serverTimestamp()
+        created_at: serverTimestamp() // align with dashboard if needed
       });
       return { id: docRef.id };
     },
-    onSuccess: async ({ id }) => {
-      try {
-        const addOnsNames =
-          (formData.add_ons || []).map(x => tickets.find(t => t.id === x)?.name).filter(Boolean).join(", ");
-        const addOnsLine = addOnsNames ? `<br/><strong>Add-ons:</strong> ${addOnsNames}` : "";
-        const summary =
-          totalAmount === 0
-            ? `<strong>Type:</strong> ${selectedProduct?.label}<br/><strong>Amount:</strong> FREE${addOnsLine}`
-            : `<strong>Type:</strong> ${selectedProduct?.label}<br/><strong>Total:</strong> $${totalAmount.toFixed(2)} USD${addOnsLine}`;
-        await sendAcknowledgementEmail({ to: formData.email, name: formData.name, registrationSummary: summary });
-      } catch {}
-      navigate(createPageUrl("RegistrationSuccess") + `?id=${id}`);
+    onSuccess: ({ id }) => {
+      // Show the in-page success card (don’t navigate, don’t send email here)
+      setShowPayPal(false);
+      setIsProcessing(false);
+      setSuccessInfo({
+        id,
+        name: formData.name,
+        email: formData.email,
+        productLabel: selectedProduct?.label || registrationData?.registration_product_id,
+        totalUSD: totalAmount
+      });
+      // Optional: clear the form
+      setFormData(prev => ({ ...prev, name: "", email: "", phone: "", country: "", organization: "", add_ons: [] }));
     },
     onError: (err) => {
       console.error("Registration write failed:", { code: err?.code, message: err?.message, details: err });
@@ -146,7 +193,7 @@ export default function Register() {
   };
 
   /* ------------------------------- submit ------------------------------- */
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!validate()) return;
 
@@ -156,9 +203,12 @@ export default function Register() {
         email: formData.email,
         phone: formData.phone,
         country: formData.country,
+        organization: formData.organization || "",
+
         registration_product_id: selectedProduct?.id, // 'user_free'
         attendee_type: selectedProduct?.kind,         // 'user'
         add_ons: formData.add_ons || [],              // []
+
         amount: 0,
         currency: "USD",
         payment_required: false,
@@ -166,7 +216,6 @@ export default function Register() {
         review_status: "pending",
       };
 
-      console.log("[DEBUG] free registration payload:", registrationData);
       createRegistrationMutation.mutate(registrationData);
       return;
     }
@@ -177,55 +226,53 @@ export default function Register() {
 
   /* ------------------------------ PayPal hooks ----------------------------- */
   const handlePayPalSuccess = async (paymentDetails) => {
-  setIsProcessing(true);
+    setIsProcessing(true);
 
-  // Extract order & capture details safely
-  const orderId =
-    paymentDetails?.id ||
-    paymentDetails?.orderID ||
-    paymentDetails?.orderId ||
-    null;
+    const orderId =
+      paymentDetails?.id ||
+      paymentDetails?.orderID ||
+      paymentDetails?.orderId ||
+      null;
 
-  const unit = paymentDetails?.purchase_units?.[0];
-  const capture = unit?.payments?.captures?.[0];
-  const payer = paymentDetails?.payer;
+    const unit = paymentDetails?.purchase_units?.[0];
+    const capture = unit?.payments?.captures?.[0];
+    const payer = paymentDetails?.payer;
 
-  const registrationData = {
-    name: formData.name,
-    email: formData.email,
-    phone: formData.phone,
-    country: formData.country,
+    const registrationData = {
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      country: formData.country,
+      organization: formData.organization || "",
 
-    registration_product_id: selectedProduct?.id,
-    attendee_type: selectedProduct?.kind,
-    add_ons: formData.add_ons || [],
+      registration_product_id: selectedProduct?.id,
+      attendee_type: selectedProduct?.kind,
+      add_ons: formData.add_ons || [],
 
-    amount: Number(totalAmount.toFixed(2)),
-    currency: "USD",
-    payment_required: true,
-    payment_provider: "paypal",
-    payment_status: "paid",
-    review_status: "pending",
+      amount: Number(totalAmount.toFixed(2)),
+      currency: "USD",
+      payment_required: true,
+      payment_provider: "paypal",
+      payment_status: "paid",
+      review_status: "pending",
 
-    // Persist important PayPal fields for reconciliation
-    paypal_order_id: orderId,
-    paypal_capture_id: capture?.id || null,
-    payer_email: payer?.email_address || null,
-    payer_name: [payer?.name?.given_name, payer?.name?.surname].filter(Boolean).join(" ") || null,
+      paypal_order_id: orderId,
+      paypal_capture_id: capture?.id || null,
+      payer_email: payer?.email_address || null,
+      payer_name: [payer?.name?.given_name, payer?.name?.surname].filter(Boolean).join(" ") || null,
+    };
+
+    try {
+      await createRegistrationMutation.mutateAsync(registrationData);
+    } catch (error) {
+      setIsProcessing(false);
+      setErrors({
+        payment:
+          "Registration failed after payment. Please contact support with order ID: " +
+          (orderId || "N/A"),
+      });
+    }
   };
-
-  try {
-    await createRegistrationMutation.mutateAsync(registrationData);
-  } catch (error) {
-    setIsProcessing(false);
-    setErrors({
-      payment:
-        "Registration failed after payment. Please contact support with order ID: " +
-        (orderId || "N/A"),
-    });
-  }
-}
-
 
   const handlePayPalError = (error) => {
     setIsProcessing(false);
@@ -237,6 +284,19 @@ export default function Register() {
     setShowPayPal(false);
     setErrors({ payment: "Payment was cancelled." });
   };
+
+  /* ------------------------- Success Card rendering ------------------------ */
+  if (successInfo) {
+    return (
+      <SuccessCard
+        name={successInfo.name}
+        email={successInfo.email}
+        productLabel={successInfo.productLabel}
+        totalUSD={successInfo.totalUSD}
+        onBackHome={() => navigate(createPageUrl("Home"))}
+      />
+    );
+  }
 
   /* ---------------------------------- UI ----------------------------------- */
   if (showPayPal && totalAmount > 0) {
