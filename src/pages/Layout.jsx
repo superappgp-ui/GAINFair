@@ -1,4 +1,4 @@
-
+// src/pages/Layout.jsx
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -12,7 +12,7 @@ const navigationItems = [
   { title: "Schedule", url: createPageUrl("Schedule") },
   { title: "Venue & Travel", url: createPageUrl("Venue") },
   { title: "FAQs", url: createPageUrl("FAQs") },
-  { title: "Register", url: createPageUrl("Register"), primary: true }
+  { title: "Register", url: createPageUrl("Register"), primary: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -21,19 +21,15 @@ export default function Layout({ children, currentPageName }) {
   const [scrolled, setScrolled] = React.useState(false);
 
   React.useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
-    };
+    const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Check if current page is CMS - hide public layout
-  const isCMSPage = currentPageName === "cms-login" || currentPageName === "cms-dashboard";
-
-  if (isCMSPage) {
-    return <>{children}</>;
-  }
+  // Hide public layout on CMS pages
+  const isCMSPage =
+    currentPageName === "cms-login" || currentPageName === "cms-dashboard";
+  if (isCMSPage) return <>{children}</>;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
@@ -41,59 +37,56 @@ export default function Layout({ children, currentPageName }) {
         :root {
           --primary: #0EA5E9;
           --primary-dark: #0284C7;
-          --dark: #0B132B;
-          --accent: #22C55E;
-          --bg: #F8FAFC;
-          --text: #475569;
-          --text-light: #64748B;
+          --ink: #0B132B;        /* dark text */
+          --muted: #475569;      /* slate-600 */
         }
-        
+
         .nav-link {
-          transition: all 0.2s ease;
           position: relative;
+          transition: all 0.2s ease;
+          color: var(--ink);
         }
-        
         .nav-link:hover {
           color: var(--primary);
+          background: rgba(14,165,233,0.08); /* blue-50 */
         }
-        
         .nav-link.active {
           color: var(--primary);
           font-weight: 600;
         }
-        
         .nav-link.active::after {
           content: '';
           position: absolute;
-          bottom: -4px;
-          left: 0;
-          right: 0;
+          left: 12px;
+          right: 12px;
+          bottom: -6px;
           height: 2px;
           background: var(--primary);
+          border-radius: 9999px;
         }
       `}</style>
 
-      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled ? 'bg-white shadow-md py-3' : 'bg-white/10 backdrop-blur-md py-5'
-      }`}>
+      <nav
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300
+        ${scrolled ? "py-3 shadow-md" : "py-4 shadow-sm"}
+        bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
+            {/* Brand */}
             <Link to={createPageUrl("Home")} className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-[#0EA5E9] to-[#22C55E] rounded-lg flex items-center justify-center shadow-lg">
                 <span className="text-white font-bold text-xl">G</span>
               </div>
               <div className="hidden sm:block">
-                <div className={`font-bold text-lg transition-colors ${scrolled ? 'text-[#0B132B]' : 'text-white drop-shadow-lg'}`}>
-                  GAIN FAIR
-                </div>
-                <div className={`text-xs transition-colors ${scrolled ? 'text-[#64748B]' : 'text-white/90'}`}>
-                  Vietnam 2025
-                </div>
+                <div className="font-bold text-lg text-[#0B132B]">GAIN FAIR</div>
+                <div className="text-xs text-[#64748B]">Vietnam 2025</div>
               </div>
             </Link>
 
+            {/* Desktop nav */}
             <div className="hidden lg:flex items-center gap-1">
-              {navigationItems.map((item) => (
+              {navigationItems.map((item) =>
                 item.primary ? (
                   <Link key={item.title} to={item.url}>
                     <Button className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white shadow-lg">
@@ -104,35 +97,31 @@ export default function Layout({ children, currentPageName }) {
                   <Link
                     key={item.title}
                     to={item.url}
-                    className={`nav-link px-4 py-2 text-sm font-medium rounded-lg ${
-                      location.pathname === item.url
-                        ? 'active'
-                        : scrolled 
-                          ? 'text-[#475569] hover:bg-gray-100' 
-                          : 'text-white hover:bg-white/20 drop-shadow-md'
+                    className={`nav-link px-4 py-2 text-sm font-medium rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0EA5E9]/40 ${
+                      location.pathname === item.url ? "active" : ""
                     }`}
                   >
                     {item.title}
                   </Link>
                 )
-              ))}
+              )}
             </div>
 
+            {/* Mobile menu button */}
             <button
-              className={`lg:hidden p-2 rounded-lg transition-colors ${
-                scrolled ? 'hover:bg-gray-100' : 'hover:bg-white/20'
-              }`}
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
+              onClick={() => setMobileMenuOpen((v) => !v)}
             >
               {mobileMenuOpen ? (
-                <X className={`w-6 h-6 ${scrolled ? 'text-[#0B132B]' : 'text-white'}`} />
+                <X className="w-6 h-6 text-[#0B132B]" />
               ) : (
-                <Menu className={`w-6 h-6 ${scrolled ? 'text-[#0B132B]' : 'text-white drop-shadow-lg'}`} />
+                <Menu className="w-6 h-6 text-[#0B132B]" />
               )}
             </button>
           </div>
         </div>
 
+        {/* Mobile menu */}
         {mobileMenuOpen && (
           <div className="lg:hidden bg-white border-t border-gray-200 shadow-lg">
             <div className="px-4 py-4 space-y-2">
@@ -143,10 +132,10 @@ export default function Layout({ children, currentPageName }) {
                   onClick={() => setMobileMenuOpen(false)}
                   className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
                     item.primary
-                      ? 'bg-[#0EA5E9] text-white hover:bg-[#0284C7]'
+                      ? "bg-[#0EA5E9] text-white hover:bg-[#0284C7]"
                       : location.pathname === item.url
-                      ? 'bg-blue-50 text-[#0EA5E9]'
-                      : 'text-[#475569] hover:bg-gray-50'
+                      ? "bg-blue-50 text-[#0EA5E9]"
+                      : "text-[#0B132B] hover:bg-gray-50"
                   }`}
                 >
                   {item.title}
@@ -159,6 +148,7 @@ export default function Layout({ children, currentPageName }) {
 
       <main>{children}</main>
 
+      {/* Footer */}
       <footer className="bg-[#0B132B] text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
@@ -168,8 +158,8 @@ export default function Layout({ children, currentPageName }) {
                   <span className="text-white font-bold text-xl">G</span>
                 </div>
                 <div>
-                  <div className="font-bold text-lg">GAIN FAIR</div>
-                  <div className="text-xs text-gray-400">Vietnam 2025</div>
+                    <div className="font-bold text-lg">GAIN FAIR</div>
+                    <div className="text-xs text-gray-400">Vietnam 2025</div>
                 </div>
               </div>
               <p className="text-gray-400 text-sm">
@@ -201,20 +191,28 @@ export default function Layout({ children, currentPageName }) {
                 </div>
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 mt-0.5 text-[#0EA5E9]" />
-                  <span>Quảng Trị Convention Center<br />Vietnam</span>
+                  <span>
+                    Quảng Trị Convention Center
+                    <br />
+                    Vietnam
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
           <div className="border-t border-gray-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-gray-400 text-sm">
-              © 2025 GAIN FAIR. All rights reserved.
-            </p>
+            <p className="text-gray-400 text-sm">© 2025 GAIN FAIR. All rights reserved.</p>
             <div className="flex gap-6 text-sm text-gray-400">
-              <a href="#" className="hover:text-[#0EA5E9] transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-[#0EA5E9] transition-colors">Terms of Service</a>
-              <a href="#" className="hover:text-[#0EA5E9] transition-colors">Contact</a>
+              <a href="#" className="hover:text-[#0EA5E9] transition-colors">
+                Privacy Policy
+              </a>
+              <a href="#" className="hover:text-[#0EA5E9] transition-colors">
+                Terms of Service
+              </a>
+              <a href="#" className="hover:text-[#0EA5E9] transition-colors">
+                Contact
+              </a>
             </div>
           </div>
         </div>
